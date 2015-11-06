@@ -44,8 +44,12 @@ export default class DestinationRequest extends EventEmitter {
             this.req.on('error', err => this._onError(err));
             this.req.setTimeout(DestinationRequest.TIMEOUT, () => this._onTimeout());
 
-            this.req.write(this.opts.body);
-            this.req.end();
+            if (this.opts.body !== null) {
+                this.req.write(this.opts.body);
+                this.req.end();
+            }
+            else
+                this.opts.proxyReq.pipe(this.req, { end: true });
         });
     }
 

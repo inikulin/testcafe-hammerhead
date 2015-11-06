@@ -27,6 +27,10 @@ function getFileInfo (contentTypeHeader, body, inputName, fileName) {
 
 
 // API
+export function hasUploads (contentTypeHeader) {
+    return contentTypeHeader && contentTypeHeader.indexOf('multipart/form-data') > -1;
+}
+
 export function inject (contentTypeHeader, body) {
     var formData = new FormData();
 

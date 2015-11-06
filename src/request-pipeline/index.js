@@ -6,16 +6,27 @@ import { MESSAGE, getText } from '../messages';
 import connectionResetGuard from './connection-reset-guard';
 import { check as checkSameOriginPolicy } from './xhr/same-origin-policy';
 import { fetchBody, respond404 } from '../utils/http';
-import { inject as injectUpload } from '../upload';
+import { inject as injectUpload, hasUploads } from '../upload';
 
 // Stages
 var stages = {
-    0: async function fetchProxyRequestBody (ctx, next) {
-        ctx.reqBody = await fetchBody(ctx.req);
+    0: async function fetchProxyRequestBodyIfNecessary (ctx, next) {
+        if (hasUploads(ctx.req.headers['content-type']))
+            ctx.reqBody = await fetchBody(ctx.req);
+
         next();
     },
 
-    1: function sendDestinationRequest (ctx, next) {
+    1: function checkSameOriginPolicyCompliance (ctx, next) {
+        if (ctx.isXhr && !checkSameOriginPolicy(ctx)) {
+            ctx.closeWithError(0);
+            return;
+        }
+
+        next();
+    },
+
+    2: function sendDestinationRequest (ctx, next) {
         var opts = createReqOpts(ctx);
         var req  = new DestinationRequest(opts);
 
@@ -26,15 +37,6 @@ var stages = {
 
         req.on('error', () => ctx.hasDestReqErr = true);
         req.on('fatalError', err => error(ctx, err));
-    },
-
-    2: function checkSameOriginPolicyCompliance (ctx, next) {
-        if (ctx.isXhr && !checkSameOriginPolicy(ctx)) {
-            ctx.closeWithError(0);
-            return;
-        }
-
-        next();
     },
 
     3: function decideOnProcessingStrategy (ctx, next) {
@@ -87,11 +89,13 @@ var stages = {
 
 // Utils
 function createReqOpts (ctx) {
-    var bodyWithUploads = injectUpload(ctx.req.headers['content-type'], ctx.reqBody);
+    if (ctx.reqBody !== null) {
+        var bodyWithUploads = injectUpload(ctx.req.headers['content-type'], ctx.reqBody);
 
-    // NOTE: First, we should rewrite the request body, because the 'content-length' header will be built based on it.
-    if (bodyWithUploads)
-        ctx.reqBody = bodyWithUploads;
+        // NOTE: First, we should rewrite the request body, because the 'content-length' header will be built based on it.
+        if (bodyWithUploads)
+            ctx.reqBody = bodyWithUploads;
+    }
 
     // NOTE: All headers, including 'content-length', are built here.
     var headers = headerTransforms.forRequest(ctx, this);
@@ -106,6 +110,7 @@ function createReqOpts (ctx) {
         method:      ctx.req.method,
         credentials: ctx.session.getAuthCredentials(),
         body:        ctx.reqBody,
+        proxyReq:    ctx.req,
         headers:     headers
     };
 }
